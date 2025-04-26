@@ -1,0 +1,642 @@
+
+---
+title: "Phân tích các yếu tố ảnh hưởng đến độ nhám bề mặt trong in 3D"
+output:
+  word_document: default
+  pdf_document:
+    latex_engine: xelatex
+    keep_tex: true
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(questionr)
+library(car)
+library(corrplot)
+```
+
+## III. Tiền xử lý dữ liệu
+```{r}
+data <- read.csv("~/BTL_XSTK/data.csv", header = TRUE, sep = ",")
+head(data, 10) #Xuát 10 dòng đầu của dữ liệu
+```
+
+**1. Làm sạch dữ liệu**
+
+Các biến trong dữ liệu gồm:
+
+- `layer_height`: Chiều cao layer
+- `wall_thickness`: Độ dày
+- `infill_density`: Mật độ lấp đầy
+- `infill_pattern`: Mật độ mô hình
+- `nozzle_temperature`: Nhiệt độ vòi phun
+- `bed_temperature`: Nhiệt độ khay
+- `print_speed`: Tốc độ in
+- `material`: Vật liệu
+- `fan_speed`: Tốc độ quạt
+- `roughness`: Độ nhám bề mặt
+
+Ta tạo một dữ liệu mới tên **new_data** gồm các biến ta quan tâm trong dữ liệu:
+
+
+```{r}
+selected_columns <- c("layer_height", "wall_thickness", "infill_density", "infill_pattern",
+                      "nozzle_temperature", "bed_temperature", "print_speed", "material",
+                      "fan_speed", "roughness")
+new_data <- data[, selected_columns]
+```
+
+**2. Kiểm tra dữ liệu khuyết:**
+```{r}
+freq.na(new_data) 
+```
+**Nhận xét:** Không có dữ liệu nào bị khuyết.
+
+## IV. Thống kê mô tả
+
+**1. Tạo function và lập bảng tính thống kê mô tả cho các biến liên tục:**
+```{r}
+conts_var <- data[, c("layer_height", "wall_thickness", "infill_density", 
+                      "nozzle_temperature", "bed_temperature", "print_speed", 
+                      "fan_speed", "roughness")] 
+```
+Trong bảng gồm các giá trị.
+```{r}
+
+mean_val <- apply(conts_var, 2, mean)
+sd_val <- apply(conts_var, 2, sd)
+var_val <- apply(conts_var, 2, var)
+median_val <- apply(conts_var, 2, median)
+min_val <- apply(conts_var, 2, min)
+max_val <- apply(conts_var, 2, max)
+quantile1 <- apply(conts_var, 2, function(x) quantile(x, probs = 0.25))
+quantile3 <- apply(conts_var, 2, function(x) quantile(x, probs = 0.75))
+#Trung bình, độ lệch chuẩn, biến số, trung vị, giá trị nhỏ nhất, giá trị lớn nhất, phân vị đơn, phân vị 3
+
+summary_stats <- data.frame(mean = mean_val, sd = sd_val, var = var_val, 
+                            median = median_val, min = min_val, max = max_val, 
+                            quantile1 = quantile1, quantile3 = quantile3)
+knitr::kable(t(summary_stats))
+
+```
+
+**2. Vẽ đồ thị histogram thể hiện phân phối cho biến `roughness`:**
+```{r}
+hist(new_data$roughness, xlab = "Roughness", ylab = "Number of Samples", main = "Histogram roughness",
+     col = "lightyellow", labels = TRUE, ylim = c(0, 12))
+```
+
+**Nhận xét:**
+
+- Đồ thị phân phối hơi lệch về phải, không có phân phối chuẩn.
+- Phân bố tần số cao nhất trong khoảng (50-200), và thấp nhât trong khoảng (300-400).
+
+**3. Vẽ các đồ thị boxplot thể hiện phân phối của biến roughness theo các biến phân loại.**
+
+**3.1. Biểu đồ hộp so sánh `độ nhám` giữa các loại biến mật độ mô hình:**
+```{r}
+
+boxplot(roughness ~ infill_pattern, data = new_data, col = c("red", "lightblue"),
+        main = "Boxplot roughness theo infill_pattern")
+```
+
+**Nhận xét:** Không có sự khác biệt nhiều về phân phối của `độ nhám` ở 2 nhóm `infill_pattern`, ta dự đoán yếu tố `infill_pattern` không ảnh hưởng đến độ.
+
+**2.1. Biểu đồ hộp so sánh `độ nhám` theo `vật liêu`:**
+```{r}
+boxplot(roughness ~ material, data = new_data, col = c("red", "lightblue"),
+        main = "Boxplot roughness theo material")
+```
+
+**Nhận xét:**   
+
+- Nhìn chung sự phân phối của 2 nhóm `material` cũng tương đồng nhưng ở loại vật 
+liệu `abs` thì có độ nhám tối đa cao hơn loại vật liệu `pla`.
+- Về khoảng phân bố thì loại vật liệu `pla` thấp hơn so với loại vật liệu `abs`, ta dự 
+đoán yếu tố material có ảnh hưởng đến biến phụ thuộc `roughness`.
+        
+**3.3. Biểu đồ phân tán `chiều cao` và `độ nhám`:**
+```{r}
+plot(new_data$layer_height, new_data$roughness, col = "blue", pch = 15,
+     xlab = "layer_height", ylab = "roughness", main = "Scatter: layer_height vs roughness")
+```
+
+**Nhận xét:**
+
+- Các điểm phân bố có xu hướng tăng lên khi biến `layer_height` tăng dần. 
+- Các điểm không nằm quá sát nhau trên cùng 1 đường thẳng  
+⇒ Có thể có quan hệ tuyến tính với nhau nhưng sẽ chỉ ở mức độ trung bình  
+⇒ Khi biến `layer_height` thay đổi thì biến `roughness` cũng thay đổi theo hay nói 
+cách khác, biến `layer_height` có ảnh hưởng đến biến `roughness`.
+
+## V. Thống kê suy diễn.
+
+**1. Bài toán 1 mẫu **
+
+**Bài toán:** Với mức ý nghĩa 5%, cho kết luận độ nhám trung bình của bản in là 170 µm 
+hay không? 
+
+*Kiểm tra giả định về phân phối chuẩn cho biến độ nhám: *
+```{r}
+qqnorm(data$roughness)
+qqline(data$roughness, col = "red")
+```
+
+**Nhận xét:**
+
+Dựa vào đồ thị ta nhận thấy đa số các quan trắc nằm xung quanh đường thẳng kì vọng 
+phân phối chuẩn, ta có thể kết luận rằng độ nhám có phân phối chuẩn. 
+
+*Ngoài ra, ta có thể dùng kiểm định `shapiro.test` để kiểm tra: *
+
+- Giả thiết H_0: Độ nhám tuân theo phân phối chuẩn 
+- Giả thiết H_1: Độ nhám không tuân theo phân phối chuẩn
+```{r}
+shapiro.test(new_data$roughness)
+```
+
+**Nhận xét: **
+
+Vì `p-value = 0.08221` > mức ý nghĩa 5% nên ta chưa bác bỏ được H_0. 
+
+Vậy ta có thể kết luận rằng độ nhám có phân phối chuẩn. 
+
+⇒ Đây là dạng bài kiểm định trung bình 1 mẫu, X có phân phối chuẩn, chưa biết 𝜎2
+
+Gọi 𝜇 là là độ nhám trung bình của bản in thực tế. 
+
+- Giả thiết H_0: 𝜇 =170
+- Giả thiết H_1: 𝜇 ≠170
+
+
+*Thực hiện kiểm định bằng `t-test`:*
+```{r}
+t.test(new_data$roughness, mu = 170)
+```
+
+**Nhận xét:** Vì `p-value = 0.9671` > mức ý nghĩa 5% nên ta chưa bác bỏ được H_0.
+
+Vậy nên ta có thể kết luận độ nhám trung bình của bản in là 170 µm, xét mức ý nghĩa 5%
+
+*Ngoài ra ta có thể đưa ra kết luận bằng cách:*
+
+Tiêu chuẩn kiểm định `t0 = 0,0414.` 
+
+Miền bác bỏ: RR = (−∞;−𝑡𝛼/2;𝑛−1) U (𝑡𝛼/2;𝑛−1;+ ∞) 
+
+- Với 𝑡𝛼/2;𝑛−1 được tính bằng công thức: 
+
+```{r}
+qt(p = 0.05/2, df = nrow(new_data)-1, lower.tail = FALSE)
+```
+
+RR = (−∞; - 2.0096) U (2.0096 ;+ ∞)
+
+Vì t0 ∉ RR nên ta chưa bác bỏ H_0. 
+
+Vậy *ta có thể kết luận độ nhám trung bình của bản in là 170 µm, xét mức ý nghĩa 5%*.
+
+**2. Kiểm định 2 mẫu.**
+
+**Bài toán:** Với mức ý nghĩa 0.05%, hãy so sánh độ nhám trung bình của bản in khi sử dụng vật liệu abs và pla. 
+
+- Chia bộ dữ liệu theo 2 nhóm vật liệu: 
+```{r}
+abs_data <- subset(data, material == "abs")
+pla_data <- subset(data, material == "pla")
+```
+
+*Kiểm tra giả định về phân phối chuẩn cho biến độ nhám ở loại vật liệu abs:*
+```{r}
+qqnorm(abs_data$roughness); qqline(abs_data$roughness, col = "red")
+```
+
+**Nhận xét:**
+
+Dựa vào đồ thị ta nhận thấy đa số các quan trắc nằm xung quanh đường thẳng kì vọng phân phối chuẩn, ta có thể kết luận rằng độ nhám ở vật liệu abs có phân phối chuẩn.
+
+*Ngoài ra, ta có thể dùng kiểm định `shapiro.test` để kiểm tra:*
+
+- Giả thiết H_0: Độ nhám ở vật liệu abs tuân theo phân phối chuẩn 
+- Giả thiết H_1: Độ nhám ở vật liệu abs không tuân theo phân phối chuẩn
+```{r}
+shapiro.test(abs_data$roughness)
+```
+
+**Nhận xét:** 
+Vì `p-value = 0.1677` > mức ý nghĩa 5% nên ta chưa bác bỏ được H_0. 
+
+Vậy ta có thể kết luận rằng độ nhám ở vật liệu abs có phân phối chuẩn. 
+
+*Kiểm tra giả định về phân phối chuẩn cho biến độ nhám ở loại vật liệu pla:*
+```{r}
+qqnorm(pla_data$roughness); qqline(pla_data$roughness, col = "red")
+```
+
+**Nhận xét:** 
+
+Dựa vào đồ thị ta nhận thấy đa số các quan trắc nằm xung quanh đường thẳng kì vọng phân phối chuẩn, ta có thể kết luận rằng độ nhám ở vật liệu pla có phân phối chuẩn.
+
+*Ngoài ra, ta có thể dùng kiểm định shapiro.test để kiểm tra:*
+
+- Giả thiết H_0: Độ nhám ở vật liệu pla tuân theo phân phối chuẩn 
+- Giả thiết H_1: Độ nhám ở vật liệu pla không tuân theo phân phối chuẩn 
+
+```{r}
+shapiro.test(pla_data$roughness)
+```
+
+**Nhận xét:**
+Vì `p-value = 0.1677` > mức ý nghĩa 5% nên ta chưa bác bỏ được H_0. 
+
+Vậy ta có thể kết luận rằng độ nhám ở vật liệu pla có phân phối chuẩn.
+
+*Thực hiện so sánh phương sai độ nhám ở 2 nhóm vật liệu: *
+
+- Giả thiết H_0:  σ_1^2=  σ_2^2 hay (σ_1^2≤ σ_2^2) 
+ 
+- Giả thiết H_1: σ_1^2> σ_2^2
+```{r}
+var.test(abs_data$roughness, pla_data$roughness, alternative = "greater")
+```
+
+**Nhận xét:** 
+Vì `p-value = 0.07024` > mức ý nghĩa 5% nên ta chưa bác bỏ được H_0. 
+
+Vậy phương sai độ nhóm ở 2 nhóm vật liệu bằng nhau.
+
+⇨ Đây là dạng bài kiểm định trung bình 2 mẫu độc lập , X1, X2 có phân phối chuẩn, chưa biết σ_1^2,  σ_2^2 với  σ_1^2= σ_2^2
+
+Gọi 𝜇1,𝜇2 lần lượt là độ nhám trung bình của bản in khi sử dụng vật liệu abs và pla. 
+
+- Giả thiết H_0: 𝜇_1 = 𝜇_2  
+- Giả thiết H_1: 𝜇_1 > 𝜇_2 
+
+*Thực hiện kiểm định bằng t-test: *
+
+```{r}
+t.test(roughness ~ material, data = data, alternative = "greater", var.equal = TRUE)
+```
+
+**Nhận xét:**
+Vì `p-value = 0.05159` > mức ý nghĩa 5% nên ta chưa bác bỏ được H_0. 
+
+Vậy nên độ nhám trung bình ở 2 nhóm vật liệu bằng nhau, xét với mức ý nghĩa 5%.
+
+**3. Bài toán phân tích phương sai**
+
+**3.1. Tính toán các giá trị**
+
+**Bài toán:** So sánh độ nhám trung bình ở 5 nhóm `layer_height`.
+
+**Phân tích:** ANOVA là bài toán so sánh trung bình của các tổng thể nhưng với yêu cầu mỗi biến ảnh hưởng phải có 3 phân loại trở lên. 
+
+Trong tập dữ liệu ta có 2 biến phân loại là `infill_patten` và `material` nhưng mỗi biến thì 
+chỉ có 2 phân loại là biến `infill_pattern` bao gồm `grid` và `honeycomb`, biến `materia`l 
+bao gồm `pla` và `abs`. 
+
+⇒ Giải pháp: Dùng biến `layer_heght` và chia các giá trị thành các nhóm.
+
+```{r}
+data$layer_height <- as.factor(data$layer_height)
+print(data$layer_height)
+```
+
+Lúc này các giá trị trong biến `layer_height` đã được chuyển sang dạng factor để phân 
+loại. 
+
+Biến `layer_height` đã có 5 nhóm lần lượt là: `0.02`, `0.06`, `0.1`, `0.15`, `0.2`. 
+Đặt giả thuyết 
+
+H_0: 𝜇_1=𝜇_2=𝜇_3=𝜇_4=𝜇_5
+
+H_1: Tồn tại 𝜇_i≠𝜇_j (i≠j)
+
+*Code thực hiện hàm anova, ta sử dụng hàm aov() để tính toán các giá trị.*
+ 
+```{r}
+anova_model <- aov(roughness ~ layer_height, data)
+summary(anova_model)
+```
+
+Ta thấy giá trị của `Pr(>F) = 1.17e-10` nhỏ hơn mức ý nghĩa 5% 
+
+⇒ Bác bỏ H_0, chấp nhận H_1  
+
+⇒ Có sự khác biệt về độ nhám trung bình giữa 5 nhóm chiều cao trong biến 
+`layer_height`.
+
+**3.2. Kiểm tra điều kiện mô hình ANOVA **
+
+Điều kiện thứ nhất:
+
+- Các quan sát từ các tổng thể dược lấy độc lập.
+
+- Các giá trị độ nhám trong dự liệu phải được lấy độc lập. 
+
+- Điều kiện thứ nhất là hiển nhiên thỏa mãn do mỗi đơn vị dữ liệu được thu thập sau mỗi lần in.
+
+Điều kiện thứ hai:
+
+- Các tổng thể phải có phân phối chuẩn 
+
+- Độ nhám ở các nhóm có phân phối chuẩn. 
+
+```{r}
+data_0.02 <- subset(data, layer_height=="0.02")
+data_0.06 <- subset(data, layer_height=="0.06")
+data_0.1 <- subset(data, layer_height=="0.1")
+data_0.15 <- subset(data, layer_height=="0.15")
+data_0.2 <- subset(data, layer_height=="0.2")
+```
+
+Ta tách các nhóm dữ liệu ra từng tập dữ liệu riêng sau đó dùng hàm `qqnorm`, `qqline` và `shapiro.test` để kiểm tra.
+
+*data_0.02*
+
+```{r}
+qqnorm(data_0.02$roughness, main = "Q-Q Plot data_0.02 Roughness")
+qqline(data_0.02$roughness)
+shapiro.test(data_0.02$roughness)
+```
+
+*data_0.06*
+```{r}
+qqnorm(data_0.06$roughness, main = "Q-Q Plot data_0.06 Roughness") 
+qqline(data_0.06$roughness)
+shapiro.test(data_0.06$roughness)
+```
+
+*data_0.1*
+```{r}
+qqnorm(data_0.1$roughness, main = "Q-Q Plot data_0.1 Roughness")
+qqline(data_0.1$roughness)
+shapiro.test(data_0.1$roughness)
+```
+
+*data_0.15*
+```{r}
+qqnorm(data_0.15$roughness, main = "Q-Q Plot data_0.15 Roughness")
+qqline(data_0.15$roughness)
+shapiro.test(data_0.15$roughness)
+```
+
+*data_0.2*
+```{r}
+qqnorm(data_0.2$roughness, main = "Q-Q Plot data_0.2 Roughness")
+qqline(data_0.2$roughness)
+shapiro.test(data_0.2$roughness)
+```
+
+Theo kết quả của code R, nhóm data có layer_height là 0.1 và 0.15 không tuân theo phân phối chuẩn, còn các nhóm còn lại tuân theo phân phối chuẩn do có giá trị `p-value` lớn hơn mức ý nghĩa 5%. 
+
+Điều kiện thứ ba: Phương sai ở các tổng thể phải bằng nhau. 
+
+Ta có:
+
+- H_0: Phương sai độ nhám ở các nhóm bằng nhau.
+
+- H_1: Có ít nhất 2 nhóm có phương sai độ nhám khác nhau.
+
+*Ta dùng hàm leveneTest để tính toán các giá trị về phương sai.*
+```{r}
+library(car)
+leveneTest(roughness ~ layer_height, data)
+```
+
+Ta thấy giá trị của `Pr(>F) = 0.2195`  lớn hơn mức ý nghĩa 5%  
+
+⇒ Chấp nhận H_0, phương sai độ nhám ở các nhóm bằng nhau. 
+
+**Kết luận:** Ta thấy dữ liệu thỏa điều kiện thứ nhất, điều kiện thứ ba nhưng ở điều kiện thứ hai còn một số nhóm data không thỏa mãn 
+
+⇒ ANOVA trong dữ liệu này có thể mang tính chất tham khảo và có thể hoàn toàn không chính xác. 
+
+**3.3. Phân tích sâu sau ANOVA (so sánh bội)**
+```{r}
+TukeyHSD(anova_model)
+plot(TukeyHSD(anova_model))
+
+```
+
+Ta có:
+
+- H_0: 𝜇_i = 𝜇_j (i≠j)
+
+- H_1: 𝜇_i ≠ 𝜇_j (i≠j) 
+
+Ta xét giá trị của `p-adj` nếu giá trị bé hơn mức ý nghĩa 5% thì sẽ bác bỏ H_0 và chấp 
+nhận H_1 
+
+Dựa vào giá trị sau khi tính toán hàm `TukeyHSD()` ta có: cặp giá trị giữa `0.1 – 0.06` và 
+`0.15 – 0.1` là lớn hơn mức ý nghĩa 5%  
+
+⇒ Ta có: 𝜇_0.1=𝜇_0.6; 𝜇_0.15=𝜇_0.1
+
+Bên cạnh đó, dựa trên các kết quả tính được, ta có thể sắp xếp theo thứ tự giảm dần của các trung bình tổng thể như sau: 𝜇_0.2>𝜇_0.15=𝜇_0.1>𝜇_0.06>𝜇_0.02
+
+**Kết luận:** Muốn độ nhám thấp nhất thì `layer_height` cũng phải thấp nhất là `0.02`, muốn 
+độ nhám giảm đi thì chiều cao lớp in `layer_height` cũng phải giảm đi.
+
+**4. Bài toán hồi quy tuyến tính đơn**
+
+**Mô hình:** Hồi quy tuyến tính đa biến.
+
+**Bài toán:** Phân tích mức độ ảnh hưởng của các thông số điều chỉnh trong máy in 3D đến độ nhám (biến roughness) của bản in như thế nào? Và dự báo thông số độ nhám của bản in dựa trên các thông số điều chỉnh trong máy in 3D cho ngẫu nhiên.
+
+**4.1. Tính toán các giá trị, xây dựng và đánh giá mô hình**
+
+*Đây là code đi tính hồi quy tuyến tính của các biến theo độ nhám.*
+
+```{r}
+model_1 <- lm(roughness ~ layer_height + wall_thickness + infill_density + infill_pattern + 
+                nozzle_temperature + bed_temperature + print_speed + material + fan_speed, new_data)
+summary(model_1)
+```
+
+*Phát hiện biến `fan_speed` có hệ số NA → có đa cộng tuyến*
+
+Kiểm tra đa cộng tuyến
+
+*Ta sử dụng thư viện corrplot để mô hình hóa ma trận tương quan giữa các biến với 
+nhau.*
+
+```{r}
+data_filter<-new_data[, c("layer_height", "wall_thickness", "infill_density", "nozzle_temperature", "bed_temperature", "print_speed", "fan_speed", "roughness")]
+
+cor_data<-cor(data_filter)
+corrplot(cor_data)
+```
+ 
+Ta dễ dàng nhìn thấy giữa biến bed_temperature và fan_speed có 2 vòng tròn xanh đậm, chứng tỏ có mối quan hệ tuyến tính mạnh với nhau.
+
+**Kết luận:** Loại bỏ biến `fan_speed`. 
+
+Chạy lại mô hình hồi quy sau khi loại bỏ biến `fan_speed` 
+
+```{r}
+model_1 <- lm(roughness ~ layer_height + wall_thickness + infill_density + infill_pattern + 
+                nozzle_temperature + bed_temperature + print_speed + material , new_data)
+summary(model_1)
+```
+
+Lúc này kết quả đã không còn hiện tượng đa cộng tuyến. 
+
+⇒ Phương trình hồi quy tuyến tính có dạng:  
+
+*Y = B_1.layer_height+B_2.wall_thickness+...*
+
+**Đánh giá:** Phương trình tổng quát thì không tìm được chỉ có thể thông qua 1 bộ dữ liệu mẫu và ở đây là dữ liệu với
+50 lần quan sát nên chỉ có thể có phương trình ước lượng mà thôi. 
+
+⇒ Phương trình hồi quy tuyến tính ước lượng có dạng: 
+
+*Y  =B_1.layer_height+B_2.wall_thickness+...*
+
+Muốn kiểm định xem các thông số của máy in 3D có ảnh hưởng như thế nào đến với độ nhám của lớp in hay không, ta đi kiểm định hệ số của từng thông số, nếu hệ số = 0 thì thông số không có ảnh hưởng đến với độ nhám của lớp in và ngược
+lại. 
+ 
+Ta có:  
+
+- H_0: B_i=0
+
+- H_1: B_i≠0
+
+**Ta sẽ đi so sánh:** `p-value` = Pr(>|t|) nếu nhỏ hơn mức ý nghĩa 5% thì sẽ bác bỏ H_0 và 
+chấp nhận H_1. Khi đó thông số có giá trị  `p-value` nhỏ hơn mức ý nghĩa 5% sẽ có ảnh 
+hưởng đến với độ nhám của lớp in và ngược lại. 
+
+Dựa vào bảng giá trị ở trên, ta thấy có 3 thông số là: wall_thickness, infill_density và 
+infill_pattern là có `p-value` lớn hơn mức ý nghĩa 5% , chứng tỏ chấp nhận H0_: B_i=0
+
+⇒ 3 thông số đó không có ảnh hưởng đến độ nhám của lớp in. 
+
+⇒ 3 thông số sẽ được loại bỏ khỏi mô hình.  
+
+**Ta xét đến yếu tố:**
+
+- R^2 : Thể hiện phần trăm biến động của độ nhám lớp in được giải thích bởi biến độc 
+lập có trong mô hình.
+
+- R^2  có phạm vi từ 0 đến 1. Càng tiến về 1 thì chứng tỏ mô hình giải thích rất tốt đối 
+với sự biến động của độ nhám lớp in do những biến độc lập (thông số máy in 3D) gây 
+ra. 
+
+**Đánh giá: **
+Đối với mô hình hồi quy tuyến tính đa bội thì khi đánh giá mô hình ta sẽ dựa vào 
+thông số R^2 hiệu chỉnh (Adjusted R-squared) để đánh giá mô hình mà không sử dụng 
+thông số R^2  
+
+**Giải thích: ** Do đối với thông số R2 thì cứ mỗi lần cung cấp 1 biến độc lập vào mô hình thì thông 
+số R2 sẽ tăng mà không quan tâm biến độc lập đó có vi phạm điều kiện gì hay không. 
+
+⇒ Dẫn đến nếu cung cấp các biến độc lập nhưng không ảnh hưởng đến mô hình vào 
+thì lúc này thông số R2 sẽ không còn đáng tin cậy nữa.
+
+Vì vậy đối với mô hình hồi quy tuyến tính đa bội, khi đánh giá mô hình sẽ dựa vào 
+thông số R^2 hiệu chỉnh để đánh giá vì thông số R^2 hiệu chỉnh sẽ cân bằng lại so với 
+việc khi đưa nhiều biến độc lập không ảnh hưởng tới mô hình. 
+
+*Ta bắt đầu xây dựng mô hình sau khi đã loại bỏ 3 biến không ảnh hưởng đến mô hình.* 
+
+```{r}
+model_2 <- lm(roughness ~ layer_height + nozzle_temperature + bed_temperature + print_speed + material, data = new_data)
+summary(model_2)
+```
+
+Lúc này ta thấy giá trị của R2 hiệu chỉnh đã tăng hơn so với ban đầu và lớn hơn 0.8 chứng tỏ mô hình đang khá tốt. 
+
+*Ta sẽ dự đoán mô hình dựa trên những giá trị ngẫu nhiên của các biến độc lập (các thông số của máy in 3D) *
+
+```{r}
+data_test <- data.frame(layer_height = 0.03, nozzle_temperature = 250, bed_temperature = 80, print_speed = 80, material = "abs")
+data_test$predicted_value <- predict(model_2, newdata = data_test, interval = "confidence", level = 0.95)
+print(data_test)
+```
+
+**4.2. Đánh giá các điều kiện của  mô hình hồi quy **
+
+*Ta sẽ dùng hàm plot() để đánh giá các điều kiện của mô hình hiện tại.*
+
+```{r}
+par(mfrow = c(2, 2))
+plot(model_2)
+```
+
+**Điều kiện thứ nhất: Sai số phải tuân theo phân phối chuẩn.**
+
+Ta sẽ dựa vào đồ thị Q-Q Residuals để đánh giá. 
+
+Ta thấy các điểm trên hình tập trung gần với đường thẳng phân phối chuẩn  
+
+⇒ Sai số tuân theo phân phối chuẩn. 
+
+⇒ Thỏa mãn điều kiện thứ nhất. 
+
+**Điều kiện thứ hai: Sai số có kì vọng bằng 0.** 
+
+Ta sẽ dựa vào đồ thị  Residuals vs Fitted để đánh giá. 
+
+Nếu đường màu đỏ nằm gần đường bằng 0 thì có thể nói sai số có kì vọng bằng 0.
+
+Ở đây ta thấy đường màu đỏ không nằm sát đường bằng 0  
+
+⇒ Mô hình có sai số có kì vọng khác 0. 
+
+⇒ Vi phạm điều kiện thứ hai. 
+
+**Điều kiện thứ ba:  Phương sai của các sai số là hằng số (sai số đồng nhất)**
+
+Nếu những điểm này nó phân bố ngẫu nhiên dọc theo đường màu đỏ 
+
+⇒ Ta nói phương sai của các sai số là hằng số  
+
+Nhưng khi nhìn vào đồ thị của hình thì ta thấy nó chỉ phân bố tập trung nhiều ở đoạn 
+đầu đường màu đỏ và khu vực giữa đường đỏ  
+
+⇒ Vi phạm điều kiện thứ ba.
+
+**Điều kiện thứ tư: Không có hiện tượng đa cộng tuyến xảy ra.**
+
+Ở đây model_2 đã được loại bỏ các biến gây nên hiện tượng đa cộng tuyến 
+
+⇒ Thỏa mãn điều kiện thứ tư.
+
+**Điều kiện thứ năm: Các sai số độc lập với nhau.**
+
+Ta sử dụng biểu đồ Residuals vs Index. 
+```{r}
+plot(residuals(model_2), type = "b", main = "Residuals vs Index",
+    xlab = "Index", ylab = "Residuals")
+abline(h = 0, col = "red")
+```
+
+Dựa trên mô hình kết quả, ta thấy các điểm phân bố theo ngẫu nhiên mà không có một quy tắc rõ ràng. 
+
+⇒ Các sai số độc lập với nhau.
+
+⇒ Thỏa mãn điều kiện thứ năm. 
+
+## VI. Thảo luận và mở rộng.
+
+Từ việc phân tích có thể thấy các yếu tố ảnh hưởng đến độ nhám là: `layer_height`, `nozzle_temperature`, `bed_temperature`, `material`, cuối cùng là `print_speed`.  
+
+R^2 hiệu chỉnh = 0.8571 cho thấy mô hình ta xây dựng tương đối phù hợp trong việc thực hiện dự báo. 
+
+Ưu điểm của phương pháp hồi quy chính là một phương pháp thống kê để thiết lập mối quan hệ giữa một biến phụ thuộc và một nhóm tập hợp các biến độc lập. Mô hình với một biến phụ thuộc với hai hoặc nhiều biến độc lập được gọi là hồi quy bội (hay còn gọi là hồi quy đa biến). 
+
+Hồi quy tuyến tính bội dễ hiểu và dễ triển khai, đặc biệt khi các biến có mối quan hệ tuyến tính và hiệu quả tính toán của phương pháp này có thể được tính toán nhanh chóng.
+
+Dự đoán chính xác các biến độc lập có mối quan hệ tuyến tính mạnh với biến phụ thuộc, phương pháp hồi quy tuyến tính bội có thể cung cấp các dự đoán chính xác, các hệ số hồi quy tuyến tính bội cung cấp thông tin về mối quan hệ giữa từng biến độc lập và biến phụ thuộc, giúp hiểu rõ hơn về ảnh hưởng của từng yếu tố. và tiện lợi cho kiểm định giả 
+thuyết, dễ dàng thực hiện các kiểm định giả thuyết về các hệ số hồi quy để kiểm tra sự ảnh hưởng của các biến độc lập ngay cả với dữ liệu lớn, nhờ các thuật toán tối ưu hóa hiệu quả. 
+
+Tuy nhiên mô hình cũng có một số nhược điểm như: Phương pháp này giả định rằng mối quan hệ giữa các biến độc lập và biến phụ thuộc là tuyến tính, điều này không phải lúc nào cũng đúng trong thực tế, hồi quy tuyến tính bội rất nhạy cảm với các điểm dữ liệu ngoại lệ, có thể làm sai lệch mô hình. 
+
+Khi các biến độc lập có tương quan cao với nhau, nó có thể gây ra đa cộng tuyến, làm cho các ước lượng hệ số hồi quy không ổn định và khó diễn giải. Phương pháp này giả định rằng các sai số có phân phối chuẩn và có phương sai không đổi. Nếu các giả định này không được thỏa mãn, kết quả hồi quy có thể không tin cậy. 
+
+Không phù hợp cho các mối quan hệ phi tuyến tính: Đối với các mối quan hệ phi tuyến tính giữa các biến, hồi quy tuyến tính bội không phải là lựa chọn tốt nhất. Các phương pháp khác như hồi quy phi tuyến hoặc mô hình cây quyết định có thể phù hợp hơn.
+
+Ngoài ra, đề tài ta có thể phân tích xây dựng bổ sung hai mô hình hồi quy của hai biến `roughness` và `elongation` dựa trên cách thức giống như xây dựng mô hình ứng với biến `tension_strenght`.
+
+Từ những phương pháp này mà đề tài đã đánh giá được hiệu quả những yếu tố của biến ảnh hướng đến các sức căng bề in 3D theo như bài toán đã được đặt ra.
